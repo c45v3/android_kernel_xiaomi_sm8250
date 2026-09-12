@@ -1,99 +1,25 @@
 name: Apply clone3 stack fix
-
 on:
   push:
-    branches:
-      - st19-clone3-stack-fix
-
+    branches: [st19-clone3-stack-fix]
 permissions:
   contents: write
-
 jobs:
   apply-fix:
-    if: ${{ !contains(github.event.head_commit.message, 'clone3: validate stack arguments') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply minimal clone3 stack fix
-        shell: bash
+      - name: Apply fix
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('kernel/fork.c')
-          s = path.read_text()
-          anchor1 = '''static bool clone3_args_valid(const struct kernel_clone_args *kargs)
-          {
-          '''
-          replacement1 = '''/**
-           * clone3_stack_valid - check and prepare stack
-           * @kargs: kernel clone args
-           *
-           * Verify that the stack arguments userspace gave us are sane.
-           * In addition, set the stack direction for userspace since it's easy for us to
-           * determine.
-           */
-          static inline bool clone3_stack_valid(struct kernel_clone_args *kargs)
-          {
-          \tif (kargs->stack == 0) {
-          \t\tif (kargs->stack_size > 0)
-          \t\t\treturn false;
-          \t} else {
-          \t\tif (kargs->stack_size == 0)
-          \t\t\treturn false;
-          
-          \t\tif (!access_ok(VERIFY_WRITE, (void __user *)kargs->stack, kargs->stack_size))
-          \t\t\treturn false;
-          
-          #if !defined(CONFIG_STACK_GROWSUP) && !defined(CONFIG_IA64)
-          \t\tkargs->stack += kargs->stack_size;
-          #endif
-          \t}
-          
-          \treturn true;
-          }
-          
-          static bool clone3_args_valid(struct kernel_clone_args *kargs)
-          {
-          '''
-          anchor2 = '''\tif ((kargs->flags & (CLONE_THREAD | CLONE_PARENT)) &&
-          \t    kargs->exit_signal)
-          \t\treturn false;
-          
-          \treturn true;
-          }
-          '''
-          replacement2 = '''\tif ((kargs->flags & (CLONE_THREAD | CLONE_PARENT)) &&
-          \t    kargs->exit_signal)
-          \t\treturn false;
-          
-          \tif (!clone3_stack_valid(kargs))
-          \t\treturn false;
-          
-          \treturn true;
-          }
-          '''
-
-          if anchor1 not in s:
-              raise SystemExit('clone3_args_valid signature anchor not found')
-          if anchor2 not in s:
-              raise SystemExit('clone3_args_valid tail anchor not found')
-          if 'clone3_stack_valid' in s:
-              raise SystemExit('clone3_stack_valid already present')
-
-          s = s.replace(anchor1, replacement1, 1)
-          s = s.replace(anchor2, replacement2, 1)
-          path.write_text(s)
-          PY
+          echo 'CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aApwID0gUGF0aCgia2VybmVsL2ZvcmsuYyIpCnMgPSBwLnJlYWRfdGV4dCgpCmExID0gInN0YXRpYyBib29sIGNsb25lM19hcmdzX3ZhbGlkKGNvbnN0IHN0cnVjdCBrZXJuZWxfY2xvbmVfYXJncyAqa2FyZ3MpXG57XG4iCnIxID0gIiIvKipcbiAqIGNsb25lM19zdGFja192YWxpZCAtIGNoZWNrIGFuZCBwcmVwYXJlIHN0YWNrXG4gKiBAa2FyZ3M6IGtlcm5lbCBjbG9uZSBhcmdzXG4gKlxuICogVmVyaWZ5IHRoYXQgdGhlIHN0YWNrIGFyZ3VtZW50cyB1c2Vyc3BhY2UgZ2F2ZSB1cyBhcmUgc2FuZS5cbiAqIEluIGFkZGl0aW9uLCBzZXQgdGhlIHN0YWNrIGRpcmVjdGlvbiBmb3IgdXNlcnNwYWNlIHNpbmNlIGl0J3MgZWFzeSBmb3IgdXMgdG9cbiAqIGRldGVybWluZS5cbiAqL1xuc3RhdGljIGlubGluZSBib29sIGNsb25lM19zdGFja192YWxpZChzdHJ1Y3Qga2VybmVsX2Nsb25lX2FyZ3MgKmthcmdzKVxue1xuXHRpZiAoa2FyZ3MtPnN0YWNrID09IDApIHtcblx0XHRpZiAoa2FyZ3MtPnN0YWNrX3NpemUgPiAwKVxuXHRcdFx0cmV0dXJuIGZhbHNlO1xuXHR9IGVsc2Uge1xuXHRcdGlmIChrYXJncy0+c3RhY2tfc2l6ZSA9PSAwKVxuXHRcdFx0cmV0dXJuIGZhbHNlO1xuXG5cdFx0aWYgKCFhY2Nlc3Nfb2soVkVSSUZZX1dSSVRFLCAodm9pZCBfX3VzZXIgKilrYXJncy0+c3RhY2ssIGthcmdzLT5zdGFja19zaXplKSlcblx0XHRcdHJldHVybiBmYWxzZTtcblxuI2lmICFkZWZpbmVkKENPTkZJR19TVEFDS19HUk9XU1VQKSAmJiAhZGVmaW5lZChDT05GSUdfSUE2NClcblx0XHRrYXJncy0+c3RhY2sgKz0ga2FyZ3MtPnN0YWNrX3NpemU7XG4jZW5kaWZcblx0fVxuXG5cdHJldHVybiB0cnVlO1xufVxuXG5zdGF0aWMgYm9vbCBjbG9uZTNfYXJnc192YWxpZChzdHJ1Y3Qga2VybmVsX2Nsb25lX2FyZ3MgKmthcmdzKVxue1xuIiIiCmEyID0gIlx0aWYgKChrYXJncy0+ZmxhZ3MgJiAoQ0xPTkVfVEhSRUFEIHwgQ0xPTkVfUEFSRU5UKSkgJiZcblx0ICAgIGthcmdzLT5leGl0X3NpZ25hbClcblx0XHRyZXR1cm4gZmFsc2U7XG5cblx0cmV0dXJuIHRydWU7XG59XG4iCnIyID0gIlx0aWYgKChrYXJncy0+ZmxhZ3MgJiAoQ0xPTkVfVEhSRUFEIHwgQ0xPTkVfUEFSRU5UKSkgJiZcblx0ICAgIGthcmdzLT5leGl0X3NpZ25hbClcblx0XHRyZXR1cm4gZmFsc2U7XG5cblx0aWYgKCFjbG9uZTNfc3RhY2tfdmFsaWQoa2FyZ3MpKVxuXHRcdHJldHVybiBmYWxzZTtcblxuXHRyZXR1cm4gdHJ1ZTtcbn1cbiIKaWYgImNsb25lM19zdGFja192YWxpZCIgaW4gczoKICAgIHJhaXNlIFN5c3RlbUV4aXQoImFscmVhZHkgYXBwbGllZCIpCmlmIGExIG5vdCBpbiBzIG9yIGEyIG5vdCBpbiBzOgogICAgcmFpc2UgU3lzdGVtRXhpdCgiYW5jaG9ycyBub3QgZm91bmQiKQpzID0gcy5yZXBsYWNlKGExLCByMSwgMSkucmVwbGFjZShhMiwgcjIsIDEpCnAud3JpdGVfdGV4dChzKQo=' | base64 -d > /tmp/apply.py
+          python3 /tmp/apply.py
       - name: Commit fix
-        shell: bash
         run: |
           git config user.name 'Casue'
           git config user.email '169557182+c45v3@users.noreply.github.com'
           git add kernel/fork.c
           git diff --cached --check
-          git diff --cached -- kernel/fork.c
           git commit -m 'UPSTREAM: clone3: validate stack arguments'
           git push origin HEAD:st19-clone3-stack-fix
