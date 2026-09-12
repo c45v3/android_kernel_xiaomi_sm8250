@@ -1,7 +1,7 @@
 name: Apply clone3 argument-copy fix
 
 on:
-  push:
+  pull_request:
     branches:
       - st19-clone3-tls-fix
 
@@ -10,11 +10,11 @@ permissions:
 
 jobs:
   apply-fix:
-    if: ${{ !contains(github.event.head_commit.message, 'fork: restore clone3 userspace argument copy') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
       - name: Restore missing clone3 argument copy
         shell: bash
@@ -56,6 +56,8 @@ jobs:
           \tif (unlikely(args.set_tid_size > MAX_PID_NS_LEVEL))
           '''
           if anchor not in s:
+              if 'copy_from_user(&args, uargs, size)' in s:
+                  raise SystemExit(0)
               raise SystemExit('expected clone3 anchor not found; refusing to modify')
           s2 = s.replace(anchor, replacement, 1)
           if s2.count('copy_from_user(&args, uargs, size)') != 1:
@@ -65,9 +67,12 @@ jobs:
       - name: Commit fix
         shell: bash
         run: |
+          if git diff --quiet -- kernel/fork.c; then
+            exit 0
+          fi
           git config user.name 'Casue'
           git config user.email '169557182+c45v3@users.noreply.github.com'
           git add kernel/fork.c
           git diff --cached --check
           git commit -m 'fork: restore clone3 userspace argument copy'
-          git push origin HEAD:st19-clone3-tls-fix
+          git push origin HEAD:${{ github.head_ref }}
