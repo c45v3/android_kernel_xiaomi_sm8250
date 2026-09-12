@@ -1,0 +1,73 @@
+name: Apply clone3 argument-copy fix
+
+on:
+  push:
+    branches:
+      - st19-clone3-tls-fix
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: ${{ !contains(github.event.head_commit.message, 'fork: restore clone3 userspace argument copy') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore missing clone3 argument copy
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('kernel/fork.c')
+          s = path.read_text()
+          anchor = '''\tif (unlikely(!access_ok(VERIFY_READ, uargs, size)))
+          \t\treturn -EFAULT;
+          
+          \tif (unlikely(args.set_tid_size > MAX_PID_NS_LEVEL))
+          '''
+          replacement = '''\tif (unlikely(!access_ok(VERIFY_READ, uargs, size)))
+          \t\treturn -EFAULT;
+          
+          \tif (size > sizeof(struct clone_args)) {
+          \t\tunsigned char __user *addr;
+          \t\tunsigned char __user *end;
+          \t\tunsigned char val;
+          
+          \t\taddr = (void __user *)uargs + sizeof(struct clone_args);
+          \t\tend = (void __user *)uargs + size;
+          
+          \t\tfor (; addr < end; addr++) {
+          \t\t\tif (get_user(val, addr))
+          \t\t\t\treturn -EFAULT;
+          \t\t\tif (val)
+          \t\t\t\treturn -E2BIG;
+          \t\t}
+          
+          \t\tsize = sizeof(struct clone_args);
+          \t}
+          
+          \tif (copy_from_user(&args, uargs, size))
+          \t\treturn -EFAULT;
+          
+          \tif (unlikely(args.set_tid_size > MAX_PID_NS_LEVEL))
+          '''
+          if anchor not in s:
+              raise SystemExit('expected clone3 anchor not found; refusing to modify')
+          s2 = s.replace(anchor, replacement, 1)
+          if s2.count('copy_from_user(&args, uargs, size)') != 1:
+              raise SystemExit('unexpected clone3 copy_from_user count')
+          path.write_text(s2)
+          PY
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name 'Casue'
+          git config user.email '169557182+c45v3@users.noreply.github.com'
+          git add kernel/fork.c
+          git diff --cached --check
+          git commit -m 'fork: restore clone3 userspace argument copy'
+          git push origin HEAD:st19-clone3-tls-fix
