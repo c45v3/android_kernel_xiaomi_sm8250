@@ -1,0 +1,99 @@
+name: Apply clone3 stack fix
+
+on:
+  push:
+    branches:
+      - st19-clone3-stack-fix
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: ${{ !contains(github.event.head_commit.message, 'clone3: validate stack arguments') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply minimal clone3 stack fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('kernel/fork.c')
+          s = path.read_text()
+          anchor1 = '''static bool clone3_args_valid(const struct kernel_clone_args *kargs)
+          {
+          '''
+          replacement1 = '''/**
+           * clone3_stack_valid - check and prepare stack
+           * @kargs: kernel clone args
+           *
+           * Verify that the stack arguments userspace gave us are sane.
+           * In addition, set the stack direction for userspace since it's easy for us to
+           * determine.
+           */
+          static inline bool clone3_stack_valid(struct kernel_clone_args *kargs)
+          {
+          \tif (kargs->stack == 0) {
+          \t\tif (kargs->stack_size > 0)
+          \t\t\treturn false;
+          \t} else {
+          \t\tif (kargs->stack_size == 0)
+          \t\t\treturn false;
+          
+          \t\tif (!access_ok(VERIFY_WRITE, (void __user *)kargs->stack, kargs->stack_size))
+          \t\t\treturn false;
+          
+          #if !defined(CONFIG_STACK_GROWSUP) && !defined(CONFIG_IA64)
+          \t\tkargs->stack += kargs->stack_size;
+          #endif
+          \t}
+          
+          \treturn true;
+          }
+          
+          static bool clone3_args_valid(struct kernel_clone_args *kargs)
+          {
+          '''
+          anchor2 = '''\tif ((kargs->flags & (CLONE_THREAD | CLONE_PARENT)) &&
+          \t    kargs->exit_signal)
+          \t\treturn false;
+          
+          \treturn true;
+          }
+          '''
+          replacement2 = '''\tif ((kargs->flags & (CLONE_THREAD | CLONE_PARENT)) &&
+          \t    kargs->exit_signal)
+          \t\treturn false;
+          
+          \tif (!clone3_stack_valid(kargs))
+          \t\treturn false;
+          
+          \treturn true;
+          }
+          '''
+
+          if anchor1 not in s:
+              raise SystemExit('clone3_args_valid signature anchor not found')
+          if anchor2 not in s:
+              raise SystemExit('clone3_args_valid tail anchor not found')
+          if 'clone3_stack_valid' in s:
+              raise SystemExit('clone3_stack_valid already present')
+
+          s = s.replace(anchor1, replacement1, 1)
+          s = s.replace(anchor2, replacement2, 1)
+          path.write_text(s)
+          PY
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name 'Casue'
+          git config user.email '169557182+c45v3@users.noreply.github.com'
+          git add kernel/fork.c
+          git diff --cached --check
+          git diff --cached -- kernel/fork.c
+          git commit -m 'UPSTREAM: clone3: validate stack arguments'
+          git push origin HEAD:st19-clone3-stack-fix
