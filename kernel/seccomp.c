@@ -865,6 +865,7 @@ static long seccomp_set_mode_filter(unsigned int flags,
 {
 	const unsigned long seccomp_mode = SECCOMP_MODE_FILTER;
 	struct seccomp_filter *prepared = NULL;
+	struct seccomp_filter *stale = NULL;
 	long ret = -EINVAL;
 
 	/* Validate flags. */
@@ -886,6 +887,13 @@ static long seccomp_set_mode_filter(unsigned int flags,
 
 	spin_lock_irq(&current->sighand->siglock);
 
+	if (unlikely(current->seccomp.mode == SECCOMP_MODE_DISABLED &&
+		     current->seccomp.filter)) {
+		stale = current->seccomp.filter;
+		current->seccomp.filter = NULL;
+		pr_warn_once("seccomp: detached stale filter chain from disabled task\n");
+	}
+
 	if (!seccomp_may_assign_mode(seccomp_mode))
 		goto out;
 
@@ -900,6 +908,7 @@ out:
 	spin_unlock_irq(&current->sighand->siglock);
 	if (flags & SECCOMP_FILTER_FLAG_TSYNC)
 		mutex_unlock(&current->signal->cred_guard_mutex);
+	__put_seccomp_filter(stale);
 out_free:
 	seccomp_filter_free(prepared);
 	return ret;
